@@ -46,6 +46,8 @@ pub use sp_runtime::{Perbill, Permill};
 /// Import the template pallet.
 pub use pallet_template;
 
+/// Import the template pallet.
+pub use pallet_subchat;
 /// An index to a block.
 pub type BlockNumber = u32;
 
@@ -267,6 +269,11 @@ impl pallet_template::Config for Runtime {
 	type Event = Event;
 }
 
+/// Configure the pallet_subchat in pallets/subchat.
+
+impl pallet_subchat::Config for Runtime {
+	type Event = Event;
+}
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime where
@@ -284,6 +291,7 @@ construct_runtime!(
 		Sudo: pallet_sudo,
 		// Include the custom logic from the pallet-template in the runtime.
 		TemplateModule: pallet_template,
+		SubchatModule: pallet_subchat,
 	}
 );
 
@@ -329,6 +337,7 @@ mod benches {
 		[pallet_balances, Balances]
 		[pallet_timestamp, Timestamp]
 		[pallet_template, TemplateModule]
+		[pallet_subchat,SubchatModule]
 	);
 }
 
