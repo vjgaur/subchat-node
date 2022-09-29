@@ -55,6 +55,11 @@ pub mod palletsubchat {
 	pub struct Pallet<T>(_);
 
 	#[pallet::storage]
+	#[pallet::getter(fn next_message_id)]
+	pub type NextMessageId<T> = StorageValue<_,u64>;
+	
+
+	#[pallet::storage]
 	#[pallet::getter(fn message_by_message_id)]
 	pub type MessageByMessageId<T: Config> =
 		StorageMap<_, Blake2_128Concat, MessageId, Message<T::AccountId, T::Moment>>;
@@ -107,6 +112,50 @@ pub mod palletsubchat {
 				created_at: now,
 				owner: Owner::Sender,
 			};
+
+			<MessageByMessageId<T>>::insert(new_id,a_message);
+			let b_id = new_id;
+			let b_message = Message{
+
+				id:b_id,
+				sender:from.clone(),
+				recipient:to.clone(),
+				content:Content::Raw(message.clone()),
+				created_at:now,
+				owner:Owner::Recipient,
+			};
+
+			<MessageByMessageId<T>>::insert(b_id,b_message);
+			<NextMessageId<T>>::put(new_id+2);
+			
+			let mut messages_a = <MessageIdsByAccountIds<T>>::get(from.clone(),to.clone()).unwrap_or(Vec::new());
+			messages_a.push(a_id);
+			<MessageIdsByAccountIds<T>>::insert(from.clone(), to.clone(), messages_a);
+
+			let mut messages_b = <MessageIdsByAccountIds<T>>::get(from.clone(),to.clone()).unwrap_or(Vec::new());
+			messages_b.push(b_id);
+			<MessageIdsByAccountIds<T>>::insert(from.clone(), to.clone(), messages_b);
+	
+			let mut recent_a = <ConversationsByAccountId<T>>::get(from.clone()).unwrap_or(Vec::new());
+
+			if !recent_a.contains(&to){
+				recent_a.push(to.clone());
+				<ConversationsByAccountId<T>>::insert(from.clone(),recent_a);
+			}
+
+			let mut recent_b = <conversations_by_account_id<T>>::get(from.clone()).unwrap_or(Vec::new());
+			if !recent_b.contains(&to){
+				recent_b.push(to.clone());
+				<ConversationsByAccountId<T>>::insert(from.clone(),recent_b);
+			}
+
+			Self::deposit_event(Event::MessageCreated(NewMessageEvent {
+				sender:from.clone(),
+				sender_message_id:a_id,
+				recipient:to.clone(),
+				recipient_message_id:b_id,
+			}));
+			Ok(().into())
 		}
 	}
 }

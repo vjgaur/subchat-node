@@ -46,6 +46,7 @@ pub use sp_runtime::{Perbill, Permill};
 /// Import the template pallet.
 pub use pallet_template;
 
+pub type Moment = u64;
 /// Import the template pallet.
 pub use pallet_subchat;
 /// An index to a block.
@@ -230,11 +231,13 @@ impl pallet_grandpa::Config for Runtime {
 
 impl pallet_timestamp::Config for Runtime {
 	/// A timestamp: milliseconds since the unix epoch.
-	type Moment = u64;
+	type Moment = Moment;
 	type OnTimestampSet = Aura;
 	type MinimumPeriod = ConstU64<{ SLOT_DURATION / 2 }>;
 	type WeightInfo = ();
 }
+
+
 
 impl pallet_balances::Config for Runtime {
 	type MaxLocks = ConstU32<50>;
@@ -292,6 +295,7 @@ construct_runtime!(
 		// Include the custom logic from the pallet-template in the runtime.
 		TemplateModule: pallet_template,
 		SubchatModule: pallet_subchat,
+
 	}
 );
 
