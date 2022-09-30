@@ -25,7 +25,7 @@ pub mod palletsubchat {
 		pub id: MessageId,
 		pub sender: AccountId,
 		pub recipient: AccountId,
-		pub message_content: Content,
+		pub content: Content,
 		pub nonce: Vec<u8>,
 		pub created_at: Moment,
 	}
@@ -33,7 +33,12 @@ pub mod palletsubchat {
 	#[pallet::config]
 	pub trait Config: frame_system::Config + pallet_timestamp::Config {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		#[pallet::constant]
+		type MaxMessageLength:Get<u32>;
+		#[pallet::constant]
+		type MaxNonceLength:Get<u32>;
 	}
+
 
 	#[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 	pub enum Owner {
@@ -58,6 +63,9 @@ pub mod palletsubchat {
 	#[pallet::getter(fn next_message_id)]
 	pub type NextMessageId<T> = StorageValue<_,u64>;
 	
+	#[pallet::storage]
+	#[pallet::getter(fn next_channel_id)]
+	pub type NextChannelId<T> = StorageValue<_,u64>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn message_by_message_id)]
@@ -65,14 +73,23 @@ pub mod palletsubchat {
 		StorageMap<_, Blake2_128Concat, MessageId, Message<T::AccountId, T::Moment>>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn message_ids_by_account_ids)]
-	pub type MessageIdsByAccountIds<T: Config> = StorageDoubleMap<
+	#[pallet::getter(fn message_ids_by_channel_ids)]
+	pub type MessageIdsByChannelId<T: Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		ChannelId,
+		Vec<MessageId>,
+	>;
+	#[pallet::storage]
+	#[pallet::getter(fn channel_id_by_account_ids)]
+	pub type ChannelIdByAccountIds<T: Config> = StorageDoubleMap<
 		_,
 		Blake2_128Concat,
 		T::AccountId,
 		Blake2_128Concat,
 		T::AccountId,
 		Vec<MessageId>,
+		ChannelId,
 	>;
 
 	#[pallet::storage]
@@ -91,15 +108,19 @@ pub mod palletsubchat {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
+		#[pallet::weight(100_000)]
 		pub fn new_message(
 			origin: OriginFor<T>,
 			dest: <T::Lookup as StaticLookup>::Source,
 			message: Vec<u8>,
+			nonce:Vec<u8>,
+			encrypted_key_of_from:Option<Vec<u8>>,
+			encrypted_key_of_to:Option<Vec<u8>>
 		) -> DispatchResultWithPostInfo {
 			let from = ensure_signed(origin)?;
 			let to = T::Lookup::lookup(dest)?;
 
-			log::debug!("random_message from {:?} to {:?}", from, to);
+			log::debug!("new_message from {:?} to {:?}", from, to);
 			let new_id = <NewMessageId<T>>::get().unwrap_or(0);
 			let now = <pallet_timestamp>::Pallet < T >> ::now();
 
