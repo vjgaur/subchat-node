@@ -137,6 +137,8 @@ pub fn native_version() -> NativeVersion {
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
 
 parameter_types! {
+	pub const MaxMessageLength:u32 = 256;
+	pub const MaxNonceLength:u32 24;
 	pub const BlockHashCount: BlockNumber = 2400;
 	pub const Version: RuntimeVersion = VERSION;
 	/// We allow for 2 seconds of compute with a 6 second average block time.
@@ -209,6 +211,11 @@ impl pallet_aura::Config for Runtime {
 	type MaxAuthorities = ConstU32<32>;
 }
 
+impl pallet_messaging::Config for Runtime {
+	type Event = Event;
+	type MaxMessageLength = MaxMessageLength;
+	type MaxNonceLength = MaxNonceLength;
+}
 impl pallet_grandpa::Config for Runtime {
 	type Event = Event;
 	type Call = Call;

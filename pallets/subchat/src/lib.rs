@@ -100,11 +100,17 @@ pub mod palletsubchat {
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		MessageCreated(NewMessage<T::AccountId>),
+		MessageCreated(ChannelId,MessageId),
+		NewChannelCreated(T::AccountId, T::AccountId, ChannelId),
+		CommonKeyUpdated(ChannelId),
 	}
 
 	#[pallet::error]
-	pub enum Error<T> {}
+	pub enum Error<T> {
+		CommonKeyRequired,
+		MaxMessageLengthExceeded,
+		MaxNounceLengthExceeded,
+	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
@@ -121,62 +127,64 @@ pub mod palletsubchat {
 			let to = T::Lookup::lookup(dest)?;
 
 			log::debug!("new_message from {:?} to {:?}", from, to);
-			let new_id = <NewMessageId<T>>::get().unwrap_or(0);
-			let now = <pallet_timestamp>::Pallet < T >> ::now();
 
-			let a_id = new_id;
-			let a_message = Message {
-				id: a_id,
-				sender: from.clone(),
-				recipient: to.clone(),
-				content: Content::Raw(message.clone()),
-				created_at: now,
-				owner: Owner::Sender,
-			};
+			let max_message_length = T::MaxMessageLength::get() as usize;
+			ensure!(message.len()<= max_message_length, Error::<T>::MaxMessageLengthExceeded);
 
-			<MessageByMessageId<T>>::insert(new_id,a_message);
-			let b_id = new_id;
-			let b_message = Message{
+			let max_nounce_length = T::MaxNonceLength::get() as usize;
+			ensure!(message.len() <= max_nounce_length,Error::<T>::MaxNounceLengthExceeded)
 
-				id:b_id,
-				sender:from.clone(),
-				recipient:to.clone(),
-				content:Content::Raw(message.clone()),
-				created_at:now,
-				owner:Owner::Recipient,
-			};
-
-			<MessageByMessageId<T>>::insert(b_id,b_message);
-			<NextMessageId<T>>::put(new_id+2);
+			let channel_id = match <ChannelIdByAccountIds<T>>::get(from.clone(),to.clone()){
+				Some(id)=> {
+					if encrypted_key_of_from.is_some() && encrypted_key_of_to.is_some(){
+						let next_channel_id = <NextChannelId>::get().unwrap_or(0);
+					}
+				}
 			
-			let mut messages_a = <MessageIdsByAccountIds<T>>::get(from.clone(),to.clone()).unwrap_or(Vec::new());
-			messages_a.push(a_id);
-			<MessageIdsByAccountIds<T>>::insert(from.clone(), to.clone(), messages_a);
 
-			let mut messages_b = <MessageIdsByAccountIds<T>>::get(from.clone(),to.clone()).unwrap_or(Vec::new());
-			messages_b.push(b_id);
-			<MessageIdsByAccountIds<T>>::insert(from.clone(), to.clone(), messages_b);
-	
-			let mut recent_a = <ConversationsByAccountId<T>>::get(from.clone()).unwrap_or(Vec::new());
-
-			if !recent_a.contains(&to){
-				recent_a.push(to.clone());
-				<ConversationsByAccountId<T>>::insert(from.clone(),recent_a);
+				<CommonKeyByAccounIdChannelId<T>>::insert(from.clone(),next_channel_id,encrypted_key_of_from.unwrap());
+				<CommonKeyByAccounIdChannelId<T>>::insert(from.clone(),next_channel_id,encrypted_key_of_to.unwrap());
+				Self::deposit_event(Event::CommonUpdated(id));
 			}
 
-			let mut recent_b = <conversations_by_account_id<T>>::get(from.clone()).unwrap_or(Vec::new());
-			if !recent_b.contains(&to){
-				recent_b.push(to.clone());
-				<ConversationsByAccountId<T>>::insert(from.clone(),recent_b);
-			}
+			let next_channel_id = <NextChannelId<T>::get().unwrap_or(0)>
+			
 
-			Self::deposit_event(Event::MessageCreated(NewMessageEvent {
+			<ChannelIdByAccountIds<T>>::insert(from.clone(), to.clone(), next_channel_id);
+			<ChannelIdByAccountIds<T>>::insert(to.clone(), from.clone(), next_channel_id);
+
+			<CommonKeyByAccounIdChannelId<T>>::insert(from.clone(),next_channel_id,encrypted_key_of_from.unwrap());
+			<CommonKeyByAccounIdChannelId<T>>::insert(from.clone(),next_channel_id,encrypted_key_of_to.unwrap());
+		
+			<NextChannelId<T>>::put(next_channel_id + 1);
+			Self::deposit_event(Event::NewChannelCreated(from.clone(), to.clone(), next_channel_id));
+
+			next_channel_id
+		}
+	};
+
+	let next_message_id = <NextMessageId<T>>::get().unwrap_or(0);
+	let now = <pallet_timestamp::Pallet<T>>::now();
+	let new_message = Message {
+				id:next_message_id,
 				sender:from.clone(),
 				sender_message_id:a_id,
 				recipient:to.clone(),
 				recipient_message_id:b_id,
 			}));
-			Ok(().into())
-		}
+			content:Content::Encrypted(message.clone()),
+			nounce,
+			created_at::now,	
+		};
+		<MessageByMessageId<T>>::insert(next_message_id,new_message);
+
+		let mut message_ids = <MessageIdsByChannelId<T>>::get(channel_id).unwrap_or(Vec::new());
+		message_ids.push(next_message_id);
+		<MessageIdsByChannelId<T>>::insert(channel_id,message_ids);
+		<NextMessageId<T>>::put(next_message_id+1);
+		Self::deposit_event(Event::MessageCreated(channel_id,next_message_id));
+		Ok(().into())
+		
 	}
+}
 }
