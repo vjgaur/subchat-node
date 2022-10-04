@@ -113,7 +113,7 @@ pub mod palletsubchat {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		#[pallet::weight(100_000)]
+		#[pallet::weight(100_000 + T::DbWeight::get().reads_writes(4,10))]
 		pub fn new_message(
 			origin: OriginFor<T>,
 			dest: <T::Lookup as StaticLookup>::Source,
