@@ -1,26 +1,19 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-
+pub use pallet::*;
 use sp_std::vec::Vec;
 use sp_std::collections::vec_deque::VecDeque;
 
 #[frame_support::pallet]
-pub mod palletsubchat {
-
+pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
+	use frame_system::pallet_prelude::*;
+	use log;
 	use sp_runtime::traits::StaticLookup;
+
 	pub type MessageId = u64;
 	pub type ChannelId = u64;
 
-	//Content Enum Type
-	#[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-	pub enum Content {
-		None,
-		Raw(Vec<u8>),
-		Encrypted(Vec<u8>),
-		IPFS(Vec<u8>),
-	}
-	//Message Struct
 	#[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 	pub struct Message<AccountId, Moment> {
 		pub id: MessageId,
@@ -31,30 +24,23 @@ pub mod palletsubchat {
 		pub created_at: Moment,
 	}
 
+	#[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+	pub enum Content {
+		None,
+		Raw(Vec<u8>),
+		Encrypted(Vec<u8>),
+		IPFS(Vec<u8>),
+	}
+
 	#[pallet::config]
 	pub trait Config: frame_system::Config + pallet_timestamp::Config {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 		#[pallet::constant]
-		type MaxMessageLength:Get<u32>;
+		type MaxMessageLength: Get<u32>;
 		#[pallet::constant]
-		type MaxNonceLength:Get<u32>;
+		type MaxNonceLength: Get<u32>;
 		#[pallet::constant]
 		type MaxRecentConversations: Get<u32>;
-	}
-
-
-	#[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-	pub enum Owner {
-		Sender,
-		Recipient,
-	}
-
-	#[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-	pub struct NewMessage<AccountId> {
-		sender: AccountId,
-		sender_message_id: MessageId,
-		recipient: AccountId,
-		recipient_message_id: MessageId,
 	}
 
 	#[pallet::pallet]
@@ -64,11 +50,11 @@ pub mod palletsubchat {
 
 	#[pallet::storage]
 	#[pallet::getter(fn next_message_id)]
-	pub type NextMessageId<T> = StorageValue<_,u64>;
-	
+	pub type NextMessageId<T> = StorageValue<_, u64>;
+
 	#[pallet::storage]
 	#[pallet::getter(fn next_channel_id)]
-	pub type NextChannelId<T> = StorageValue<_,u64>;
+	pub type NextChannelId<T> = StorageValue<_, u64>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn message_by_message_id)]
@@ -76,30 +62,39 @@ pub mod palletsubchat {
 		StorageMap<_, Blake2_128Concat, MessageId, Message<T::AccountId, T::Moment>>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn message_ids_by_channel_ids)]
-	pub type MessageIdsByChannelId<T: Config> = StorageMap<
+	#[pallet::getter(fn message_ids_by_channel_id)]
+	pub type MessageIdsByChannelId<T: Config> = StorageMap<_, Blake2_128Concat, ChannelId, Vec<MessageId>>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn channel_id_by_account_ids)]
+	pub type ChannelIdByAccountIds<T: Config> = StorageDoubleMap<
 		_,
 		Blake2_128Concat,
+		T::AccountId,
+		Blake2_128Concat,
+		T::AccountId,
 		ChannelId,
-		Vec<MessageId>,
-	>;
-	#[pallet::storage]
-	#[pallet::getter(fn account_ids_by_account_id)]
-	pub type AccountIdsByAccountId<T: Config> = StorageMap<
-		_, Blake2_128Concat, 
-		T::AccountId, 
-		VecDeque<T::AccountId>
 	>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn conversations_by_account_id)]
-	pub type ConversationsByAccountId<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, Vec<T::AccountId>>;
+	#[pallet::getter(fn account_ids_by_account_id)]
+	pub type AccountIdsByAccountId<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, VecDeque<T::AccountId>>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn common_key_by_account_id_channel_id)]
+	pub type CommonKeyByAccountIdChannelId<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId,
+		Blake2_128Concat,
+		ChannelId,
+		Vec<u8>,
+	>;
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		MessageCreated(ChannelId,MessageId),
+		MessageCreated(ChannelId, MessageId),
 		NewChannelCreated(T::AccountId, T::AccountId, ChannelId),
 		CommonKeyUpdated(ChannelId),
 	}
@@ -108,89 +103,93 @@ pub mod palletsubchat {
 	pub enum Error<T> {
 		CommonKeyRequired,
 		MaxMessageLengthExceeded,
-		MaxNounceLengthExceeded,
+		MaxNonceLengthExceeded,
 	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		#[pallet::weight(100_000 + T::DbWeight::get().reads_writes(4,10))]
+		#[pallet::weight(100_000 )]
 		pub fn new_message(
 			origin: OriginFor<T>,
 			dest: <T::Lookup as StaticLookup>::Source,
-			message: Vec<u8>,
-			nonce:Vec<u8>,
-			encrypted_key_of_from:Option<Vec<u8>>,
-			encrypted_key_of_to:Option<Vec<u8>>
+			message: Vec<u8>, // encrypted message
+			nonce: Vec<u8>, // a nonce for decrypting the message
+			encrypted_key_of_from: Option<Vec<u8>>, 
+			encrypted_key_of_to: Option<Vec<u8>>
 		) -> DispatchResultWithPostInfo {
 			let from = ensure_signed(origin)?;
 			let to = T::Lookup::lookup(dest)?;
 
 			log::debug!("new_message from {:?} to {:?}", from, to);
 
+			// validate the message length
 			let max_message_length = T::MaxMessageLength::get() as usize;
-			ensure!(message.len()<= max_message_length, Error::<T>::MaxMessageLengthExceeded);
+			ensure!(message.len() <= max_message_length, Error::<T>::MaxMessageLengthExceeded);
 
-			let max_nounce_length = T::MaxNonceLength::get() as usize;
-			ensure!(message.len() <= max_nounce_length,Error::<T>::MaxNounceLengthExceeded)
+			// validate the nonce length
+			let max_nonce_length = T::MaxNonceLength::get() as usize;
+			ensure!(nonce.len() <= max_nonce_length, Error::<T>::MaxNonceLengthExceeded);
 
-			let channel_id = match <ChannelIdByAccountIds<T>>::get(from.clone(),to.clone()){
-				Some(id)=> {
-					if encrypted_key_of_from.is_some() && encrypted_key_of_to.is_some(){
-						let next_channel_id = <NextChannelId>::get().unwrap_or(0);
+			// check if both parties belong to a channel
+			let channel_id = match <ChannelIdByAccountIds<T>>::get(from.clone(), to.clone()) {
+				Some(id) => {
+					if encrypted_key_of_from.is_some() && encrypted_key_of_to.is_some() {
+						let next_channel_id = <NextChannelId<T>>::get().unwrap_or(0);
+
+						<CommonKeyByAccountIdChannelId<T>>::insert(from.clone(), next_channel_id, encrypted_key_of_from.unwrap());
+						<CommonKeyByAccountIdChannelId<T>>::insert(to.clone(), next_channel_id, encrypted_key_of_to.unwrap());
+
+						Self::deposit_event(Event::CommonKeyUpdated(id));
 					}
+
+					id
+				},
+				None => {
+					ensure!(encrypted_key_of_from.is_some() && encrypted_key_of_to.is_some(), Error::<T>::CommonKeyRequired);
+
+					let next_channel_id = <NextChannelId<T>>::get().unwrap_or(0);
+
+					<ChannelIdByAccountIds<T>>::insert(from.clone(), to.clone(), next_channel_id);
+					<ChannelIdByAccountIds<T>>::insert(to.clone(), from.clone(), next_channel_id);
+
+					<CommonKeyByAccountIdChannelId<T>>::insert(from.clone(), next_channel_id, encrypted_key_of_from.unwrap());
+					<CommonKeyByAccountIdChannelId<T>>::insert(to.clone(), next_channel_id, encrypted_key_of_to.unwrap());
+
+					<NextChannelId<T>>::put(next_channel_id + 1);
+					Self::deposit_event(Event::NewChannelCreated(from.clone(), to.clone(), next_channel_id));
+
+					next_channel_id
 				}
-			
+			};
 
-				<CommonKeyByAccounIdChannelId<T>>::insert(from.clone(),next_channel_id,encrypted_key_of_from.unwrap());
-				<CommonKeyByAccounIdChannelId<T>>::insert(from.clone(),next_channel_id,encrypted_key_of_to.unwrap());
-				Self::deposit_event(Event::CommonUpdated(id));
-			}
+			// save the message & other part as usual
+			let next_message_id = <NextMessageId<T>>::get().unwrap_or(0);
+			let now = <pallet_timestamp::Pallet<T>>::now();
+			let new_message = Message {
+				id: next_message_id,
+				sender: from.clone(),
+				recipient: to.clone(),
+				content: Content::Encrypted(message.clone()),
+				nonce,
+				created_at: now,
+			};
 
-			let next_channel_id = <NextChannelId<T>::get().unwrap_or(0)>
-			
+			<MessageByMessageId<T>>::insert(next_message_id, new_message);
 
-			<ChannelIdByAccountIds<T>>::insert(from.clone(), to.clone(), next_channel_id);
-			<ChannelIdByAccountIds<T>>::insert(to.clone(), from.clone(), next_channel_id);
+			let mut message_ids = <MessageIdsByChannelId<T>>::get(channel_id).unwrap_or(Vec::new());
+			message_ids.push(next_message_id);
+			<MessageIdsByChannelId<T>>::insert(channel_id, message_ids);
 
-			<CommonKeyByAccounIdChannelId<T>>::insert(from.clone(),next_channel_id,encrypted_key_of_from.unwrap());
-			<CommonKeyByAccounIdChannelId<T>>::insert(from.clone(),next_channel_id,encrypted_key_of_to.unwrap());
-		
-			<NextChannelId<T>>::put(next_channel_id + 1);
-			Self::deposit_event(Event::NewChannelCreated(from.clone(), to.clone(), next_channel_id));
+			let max_recent_conversations = T::MaxRecentConversations::get() as usize;
+			Self::update_recent_conversations(from.clone(), to.clone(), max_recent_conversations);
+			Self::update_recent_conversations(to.clone(), from.clone(), max_recent_conversations);
 
-			next_channel_id
+			<NextMessageId<T>>::put(next_message_id + 1);
+			Self::deposit_event(Event::MessageCreated(channel_id, next_message_id));
+
+			Ok(().into())
 		}
-	};
-
-	let next_message_id = <NextMessageId<T>>::get().unwrap_or(0);
-	let now = <pallet_timestamp::Pallet<T>>::now();
-	let new_message = Message {
-				id:next_message_id,
-				sender:from.clone(),
-				sender_message_id:a_id,
-				recipient:to.clone(),
-				recipient_message_id:b_id,
-			}));
-			content:Content::Encrypted(message.clone()),
-			nounce,
-			created_at::now,	
-		};
-		<MessageByMessageId<T>>::insert(next_message_id,new_message);
-
-		let mut message_ids = <MessageIdsByChannelId<T>>::get(channel_id).unwrap_or(Vec::new());
-		message_ids.push(next_message_id);
-		<MessageIdsByChannelId<T>>::insert(channel_id,message_ids);
-		
-		let max_recent_conversations = T::MaxRecentConversations::get() as usize;
-		Self::update_recent_conversations(from.clone(), to.clone(), max_recent_conversations);
-		Self::update_recent_conversations(to.clone(), from.clone(), max_recent_conversations);
-		
-		<NextMessageId<T>>::put(next_message_id+1);
-		Self::deposit_event(Event::MessageCreated(channel_id,next_message_id));
-		Ok(().into())
-		
 	}
-}
 }
 
 impl<T: Config> Pallet<T> {
